@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Alarm Clock</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .clock { font-size: 3em; }
+        .weather, .sensor { font-size: 2em; }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="clock" id="clock"></div>
+        <div class="weather" id="weather"></div>
+        <div class="sensor" id="sensor"></div>
+    </div>
+    <script>
+        function updateClock() {
+            var now = new Date();
+            document.getElementById('clock').innerHTML = now.toLocaleTimeString();
+            setTimeout(updateClock, 1000);
+        }
+
+        function updateWeather() {
+            fetch('/weather')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('weather').innerHTML = `Temp: ${data.main.temp}°C, ${data.weather[0].main}`;
+                });
+            setTimeout(updateWeather, 600000); // Aggiorna ogni 10 minuti
+        }
+
+        function updateSensorData() {
+            fetch('/sensor_data')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('sensor').innerHTML = `Indoor Temp: ${data.temperature}°C, Pressure: ${data.pressure}`;
+                });
+            setTimeout(updateSensorData, 5000); // Aggiorna ogni 5 secondi
+        }
+
+        updateClock();
+        updateWeather();
+        updateSensorData();
+    </script>
+</body>
+</html>
