@@ -1,60 +1,111 @@
-from flask import Flask, render_template, jsonify
-import RPi.GPIO as GPIO
 import time
-import board
-import busio
-import Adafruit_BMP.BMP085 as BMP085
+import smbus2
+from flask import Flask, render_template_string
+from tabulate import tabulate
 
-# Setup per GPIO
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-led_pin = 18                        # Pin di connessione led per il risveglio
-GPIO.setup(led_pin, GPIO.OUT)
-
-# Setup per PWM
-pwm = GPIO.PWM(led_pin, 100)    # Imposta il canale PWM e la frequenza a 100 Hz
-pwm.start(0)                    # Inizia con il LED spento
-
-# Setup per BMP180
-sensor = BMP085.BMP085()
-
-# Fototransistore per rilevare la luminosità
-ldr_pin = 23                    # Pin di collegamento fotoresistore
-GPIO.setup(ldr_pin, GPIO.IN)
-
+# Initialize the Flask application
 app = Flask(__name__)
+
+# Use the I2C bus (bus 0 corresponds to GPIO0 and GPIO1)
+bus = smbus2.SMBus(0)  # '0' refers to the I2C0 bus
+
+# BMP280 I2C address
+BMP280_I2C_ADDR = 0x76
+
+# Read calibration data from BMP280
+def read_calibration_data():
+    calib = []
+    for i in range(0x88, 0x88+24):
+        calib.append(bus.read_byte_data(BMP280_I2C_ADDR, i))
+    calib.append(bus.read_byte_data(BMP280_I2C_ADDR, 0xA1))
+    calib.append(bus.read_byte_data(BMP280_I2C_ADDR, 0xE1))
+    calib.append(bus.read_byte_data(BMP280_I2C_ADDR, 0xE2))
+    calib.append(bus.read_byte_data(BMP280_I2C_ADDR, 0xE3))
+
+    dig_T1 = (calib[1] << 8) | calib[0]
+    dig_T2 = (calib[3] << 8) | calib[2]
+    dig_T3 = (calib[5] << 8) | calib[4]
+    dig_P1 = (calib[7] << 8) | calib[6]
+    dig_P2 = (calib[9] << 8) | calib[8]
+    dig_P3 = (calib[11] << 8) | calib[10]
+    dig_P4 = (calib[13] << 8) | calib[12]
+    dig_P5 = (calib[15] << 8) | calib[14]
+    dig_P6 = (calib[17] << 8) | calib[16]
+    dig_P7 = (calib[19] << 8) | calib[18]
+    dig_P8 = (calib[21] << 8) | calib[20]
+    dig_P9 = (calib[23] << 8) | calib[22]
+
+    return (dig_T1, dig_T2, dig_T3, dig_P1, dig_P2, dig_P3, dig_P4, dig_P5, dig_P6, dig_P7, dig_P8, dig_P9)
+
+def read_raw_data(reg):
+    msb = bus.read_byte_data(BMP280_I2C_ADDR, reg)
+    lsb = bus.read_byte_data(BMP280_I2C_ADDR, reg + 1)
+    xlsb = bus.read_byte_data(BMP280_I2C_ADDR, reg + 2)
+    return ((msb << 12) | (lsb << 4) | (xlsb >> 4))
+
+def compensate_temperature(adc_T, calib):
+    dig_T1, dig_T2, dig_T3 = calib[:3]
+
+    var1 = ((((adc_T >> 3) - (dig_T1 << 1))) * (dig_T2)) >> 11
+    var2 = (((((adc_T >> 4) - (dig_T1)) * ((adc_T >> 4) - (dig_T1))) >> 12) * (dig_T3)) >> 14
+
+    t_fine = var1 + var2
+    T = (t_fine * 5 + 128) >> 8
+
+    return T / 100.0, t_fine
+
+def compensate_pressure(adc_P, calib, t_fine):
+    dig_P1, dig_P2, dig_P3, dig_P4, dig_P5, dig_P6, dig_P7, dig_P8, dig_P9 = calib[3:]
+
+    var1 = (t_fine) - 128000
+    var2 = var1 * var1 * dig_P6
+    var2 = var2 + ((var1 * dig_P5) << 17)
+    var2 = var2 + ((dig_P4) << 35)
+    var1 = ((var1 * var1 * dig_P3) >> 8) + ((var1 * dig_P2) << 12)
+    var1 = (((1 << 47) + var1) * (dig_P1)) >> 33
+
+    if var1 == 0:
+        return 0  # Avoid division by zero
+
+    P = 1048576 - adc_P
+    P = (((P << 31) - var2) * 3125) // var1
+    var1 = ((dig_P9) * (P >> 13) * (P >> 13)) >> 25
+    var2 = ((dig_P8) * P) >> 19
+
+    P = ((P + var1 + var2) >> 8) + ((dig_P7) << 4)
+    return P / 25600.0
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    calib = read_calibration_data()
+    raw_temp = read_raw_data(0xFA)
+    raw_press = read_raw_data(0xF7)
 
-@app.route('/sensor_data')
-def sensor_data():
-    temperature = sensor.read_temperature()
-    pressure = sensor.read_pressure()
-    return jsonify({'temperature': temperature, 'pressure': pressure})
+    temp_celsius, t_fine = compensate_temperature(raw_temp, calib)
+    press_hpa = compensate_pressure(raw_press, calib, t_fine)
 
-@app.route('/set_alarm/<int:duration>')
-def set_alarm(duration):
-    """ Accende il LED con luminosità crescente per una durata specificata. """
-    step_duration = duration / 100  # Calcola la durata di ogni passo
-    for i in range(101):            # 0 a 100 inclusi
-        pwm.ChangeDutyCycle(i)      # Cambia il duty cycle per aumentare la luminosità
-        time.sleep(step_duration)
-    pwm.ChangeDutyCycle(0)          # Spenga il LED al termine
-    return jsonify({'status': 'Alarm executed'})
+    data = [
+        ["Measurement", "Value"],
+        ["Temperature (°C)", f"{temp_celsius:.2f}"],
+        ["Pressure (hPa)", f"{press_hpa:.2f}"]
+    ]
 
-@app.route('/adjust_brightness')
-def adjust_brightness():
-    """ Regola la luminosità dello schermo in base alla luce ambientale. """
-    light_level = GPIO.input(ldr_pin)
-    if light_level == 0:  # Basso livello di luce, spegni il display
-        # Cerca codice per spegnere il display da software
-        pass
-    else:  # Luminosità sufficiente, accendi il display
-        # Cerca codice per accendere il display da software
-        pass
-    return jsonify({'light_level': light_level, 'status': 'Display adjusted'})
+    table = tabulate(data, headers="firstrow", tablefmt="html")
+
+    # HTML template to display the data
+    html_template = f"""
+    <html>
+        <head>
+            <title>BMP280 Sensor Data</title>
+        </head>
+        <body>
+            <h1>BMP280 Sensor Data</h1>
+            {table}
+        </body>
+    </html>
+    """
+
+    return render_template_string(html_template)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
