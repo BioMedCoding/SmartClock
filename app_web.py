@@ -1,7 +1,7 @@
 import time
 import smbus2
 from flask import Flask, render_template_string
-from tabulate import tabulate
+import datetime
 
 # Initialize the Flask application
 app = Flask(__name__)
@@ -84,23 +84,72 @@ def index():
     temp_celsius, t_fine = compensate_temperature(raw_temp, calib)
     press_hpa = compensate_pressure(raw_press, calib, t_fine)
 
-    data = [
-        ["Measurement", "Value"],
-        ["Temperature (°C)", f"{temp_celsius:.2f}"],
-        ["Pressure (hPa)", f"{press_hpa:.2f}"]
-    ]
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    table = tabulate(data, headers="firstrow", tablefmt="html")
-
-    # HTML template to display the data
     html_template = f"""
     <html>
         <head>
             <title>BMP280 Sensor Data</title>
+            <style>
+                body {{
+                    font-family: Arial, sans-serif;
+                    background-color: #f4f4f4;
+                    color: #333;
+                    margin: 0;
+                    padding: 0;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 50px auto;
+                    padding: 20px;
+                    background-color: #fff;
+                    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+                    border-radius: 8px;
+                    text-align: center;
+                }}
+                h1 {{
+                    color: #007BFF;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 20px 0;
+                }}
+                table, th, td {{
+                    border: 1px solid #ddd;
+                }}
+                th, td {{
+                    padding: 8px;
+                    text-align: center;
+                }}
+                th {{
+                    background-color: #007BFF;
+                    color: white;
+                }}
+                p {{
+                    margin: 10px 0;
+                }}
+            </style>
         </head>
         <body>
-            <h1>BMP280 Sensor Data</h1>
-            {table}
+            <div class="container">
+                <h1>BMP280 Sensor Data</h1>
+                <p>{current_time}</p>
+                <table>
+                    <tr>
+                        <th>Measurement</th>
+                        <th>Value</th>
+                    </tr>
+                    <tr>
+                        <td>Temperature (°C)</td>
+                        <td>{temp_celsius:.2f}</td>
+                    </tr>
+                    <tr>
+                        <td>Pressure (hPa)</td>
+                        <td>{press_hpa:.2f}</td>
+                    </tr>
+                </table>
+            </div>
         </body>
     </html>
     """
@@ -109,3 +158,4 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+
