@@ -12,7 +12,6 @@ bus = smbus2.SMBus(0)  # '0' refers to the I2C0 bus
 # BMP280 I2C address
 BMP280_I2C_ADDR = 0x76
 
-# Read calibration data from BMP280
 def read_calibration_data():
     calib = []
     for i in range(0x88, 0x88+24):
@@ -90,6 +89,7 @@ def index():
     <html>
         <head>
             <title>BMP280 Sensor Data</title>
+            <meta http-equiv="refresh" content="5">  <!-- Auto-refresh every 5 seconds -->
             <style>
                 body {{
                     font-family: Arial, sans-serif;
@@ -158,4 +158,3 @@ def index():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
-

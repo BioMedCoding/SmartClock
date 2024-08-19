@@ -85,7 +85,7 @@ def update_data():
     label_press.config(text=f"Pressure: {press_hpa:.2f} hPa")
     label_time.config(text=current_time)
 
-    root.after(2000, update_data)
+    root.after(5000, update_data)  # Update every 5 seconds
 
 # Tkinter GUI setup
 root = tk.Tk()
